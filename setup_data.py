@@ -45,9 +45,9 @@ def get_signals(record):
     data = record.p_signal
     names = record.sig_name
 
-    lat = data[:, names.index("Patch_ACC_lat")]
-    hf = data[:, names.index("Patch_ACC_hf")]
-    dv = data[:, names.index("Patch_ACC_dv")]
+    lat = data[:, names.index("patch_ACC_lat")]
+    hf = data[:, names.index("patch_ACC_hf")]
+    dv = data[:, names.index("patch_ACC_dv")]
 
     return {"lat": lat, "hf": hf, "dv": dv}
 
@@ -57,6 +57,8 @@ def preprocess_scg(lat, hf, dv):
     scg = np.sqrt(lat**2 + hf**2 + dv**2)
 
     # Apply bandpass
+    # Note that SCG signals can be extracted using a [1, 40] Hz bandpass filter.
+    # From the paper
     scg = bandpass_filter(scg, 1, 40)
 
     # Normalize
@@ -119,6 +121,7 @@ for pid in ids:
     path = f"C:/Users/nitya/Documents/VSCode/nasaorbitdata/processed_data/{record_name}"
 
     record = wfdb.rdrecord(path)
+    #print(record.sig_name) to see all signlas
 
     signals  = get_signals(record)
 
