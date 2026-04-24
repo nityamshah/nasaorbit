@@ -41,6 +41,9 @@ def bandpass_filter(x, low=1, high=40, fs=500, order=3):
     b, a = butter(order, [low/(fs/2), high/(fs/2)], btype='band')
     return filtfilt(b, a, x)
 
+def preprocess_axis(signal):
+    return bandpass_filter(signal, 1, 40)
+
 def get_signals(record):
     data = record.p_signal
     names = record.sig_name
@@ -86,9 +89,9 @@ def get_label_for_record(record_name):
     return 0 if nyhac in [1, 2] else 1
 
 def time_features(x):
-    # mean, standard dev, rms, max, min, peak to peak
+    x = (x - np.mean(x)) / (np.std(x) + 1e-8)  # per window normalization
     return [
-        np.mean(x), np.std(x), np.sqrt(np.mean(x**2)), np.max(x), np.min(x), np.ptp(x)
+        np.sqrt(np.mean(x**2)), np.max(x), np.min(x), np.ptp(x)
     ]
 
 def freq_features(x, fs):
@@ -111,32 +114,44 @@ def extract_features(window, fs):
     return features 
 
 # Main starts here
+def run_pipeline():
+    X = []
+    y = []
+    groups = []
 
-X = []
-y = []
-groups = []
+    for pid in ids:
+        record_name = f"TRM{pid}-RHC1"
+        path = f"C:/Users/nitya/Documents/VSCode/nasaorbitdata/processed_data/{record_name}"
 
-for pid in ids:
-    record_name = f"TRM{pid}-RHC1"
-    path = f"C:/Users/nitya/Documents/VSCode/nasaorbitdata/processed_data/{record_name}"
+        record = wfdb.rdrecord(path)
+        #print(record.sig_name) to see all signlas
 
-    record = wfdb.rdrecord(path)
-    #print(record.sig_name) to see all signlas
+        signals  = get_signals(record)
 
-    signals  = get_signals(record)
+        # Preprocess each axis separately
+        lat = preprocess_axis(signals["lat"])
+        hf  = preprocess_axis(signals["hf"])
+        dv  = preprocess_axis(signals["dv"])
 
-    scg = preprocess_scg(signals["lat"], signals["hf"], signals["dv"])
+        # Window each axis
+        wins_lat = window_signal(lat, 500, 5, 2.5)
+        wins_hf  = window_signal(hf,  500, 5, 2.5)
+        wins_dv  = window_signal(dv,  500, 5, 2.5)
 
-    windows = window_signal(scg, 500, 5, 2.5) # 500 is from the dataset
 
-    label = get_label_for_record(record_name)
+        label = get_label_for_record(record_name)
 
-    for window in windows:
-        features = extract_features(window, 500)
-        X.append(features)
-        y.append(label)
-        groups.append(pid)
+        for w_lat, w_hf, w_dv in zip(wins_lat, wins_hf, wins_dv):
+            features = (
+                extract_features(w_lat, 500) +
+                extract_features(w_hf,  500) +
+                extract_features(w_dv,  500)
+            )
+            X.append(features)
+            y.append(label)
+            groups.append(pid)
 
-    print (f"Processed {record_name}")
+        print (f"Processed {record_name}")
 
+    return X, y, groups
 

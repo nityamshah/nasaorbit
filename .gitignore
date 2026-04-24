@@ -2,3 +2,6 @@ data/
 *.dat
 *.hea
 *.json
+
+__pycache__/
+*.pyc
