@@ -14,8 +14,6 @@ X = np.array(X)
 y = np.array(y)
 groups = np.array(groups)
 
-# print("Shape:", X.shape)
-# print("Labels:", Counter(y))
 
 # Group K Fold ensures that same data is not in train and test split
 gkf = GroupKFold()
@@ -51,7 +49,7 @@ bal_acc = balanced_accuracy_score(all_true, all_preds)
 precision = precision_score(all_true, all_preds)
 recall = recall_score(all_true, all_preds)
 
-print("\n===== FINAL MODEL PERFORMANCE =====")
+print("\nPerformance")
 print(f"Accuracy: {acc:.3f}")
 print(f"F1 Score: {f1:.3f}")
 print(f"ROC-AUC: {auc:.3f}")
