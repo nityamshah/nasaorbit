@@ -51,8 +51,6 @@ def get_label_from_json(json_path):
     else:
         return None
 
-
-
 def bandpass_filter(x, low=1, high=40, fs=500, order=3):
     b, a = butter(order, [low/(fs/2), high/(fs/2)], btype='band')
     return filtfilt(b, a, x)
@@ -80,7 +78,8 @@ def time_features_beats(beats):
     ptp = np.ptp(beats, axis=1)
     
     features = []
-    for arr in [rms, ptp]:
+    #for arr in [ptp, rms]:
+    for arr in [ptp]:
         features += [np.mean(arr), np.std(arr), np.median(arr)]
     return features  # 6 features per axis
 
@@ -95,13 +94,8 @@ def freq_features_beats(beats, fs=500):
     bp10_20 = np.sum(pxx[(f >= 10) & (f < 20)])
     bp20_40 = np.sum(pxx[(f >= 20) & (f < 40)])
     
-    return [dom_freq, spec_entropy, bp1_10, bp10_20, bp20_40]  # 5 per axis
-
-def waveform_variability(beats):
-    template = np.mean(beats, axis=0)
-    diffs = beats - template  # (n_beats, beat_len)
-    variability = np.sqrt(np.mean(diffs**2, axis=1))  # RMS diff per beat
-    return [np.mean(variability), np.std(variability)]  # 2 per axis
+    #return [dom_freq, spec_entropy, bp1_10, bp10_20, bp20_40]  # 5 per axis
+    return [bp10_20, dom_freq]
 
 def timing_features(beats, fs=500, pre_ms=100):
     from scipy.ndimage import uniform_filter1d
@@ -132,91 +126,6 @@ def timing_features(beats, fs=500, pre_ms=100):
     else:
         return [np.nan, np.nan]
 
-def hrv_features(r_peaks, fs=500):
-    if len(r_peaks) < 3:
-        return [0.0] * 5
-    rr = np.diff(r_peaks) / fs * 1000  # in ms
-    rr = rr[(rr > 300) & (rr < 2000)]  # physiological range
-    if len(rr) < 2:
-        return [0.0] * 5
-    sdnn   = np.std(rr)
-    rmssd  = np.sqrt(np.mean(np.diff(rr)**2))
-    mean_hr = 60000 / np.mean(rr)
-    pnn50  = np.mean(np.abs(np.diff(rr)) > 50) * 100
-    cv_rr  = sdnn / (np.mean(rr) + 1e-8)  # coefficient of variation
-    return [sdnn, rmssd, mean_hr, pnn50, cv_rr]  # 5 features
-
-def window_morphology_features(avg_beat, fs=500, pre_ms=100):
-    """
-    Extract morphology features from the average SCG beat.
-
-    The beat is assumed to be segmented from:
-        -pre_ms to +400 ms around the R peak.
-
-    Features are calculated in post-R windows:
-        0-50, 50-100, ..., 350-400 ms
-
-    Per window features:
-        mean, std, max, min, peak-to-peak, AUC, absolute AUC,
-        time of max, time of min
-    """
-
-    features = []
-
-    windows = [
-        (0, 50),
-        (50, 100),
-        (100, 150),
-        (150, 200),
-        (200, 250),
-        (250, 300),
-        (300, 350),
-        (350, 400),
-    ]
-
-    r_index = int(pre_ms * fs / 1000)
-
-    for start_ms, end_ms in windows:
-        start = r_index + int(start_ms * fs / 1000)
-        end = r_index + int(end_ms * fs / 1000)
-
-        segment = avg_beat[start:end]
-
-        if len(segment) == 0:
-            features += [0.0] * 9
-            continue
-
-        mean_val = np.mean(segment)
-        std_val = np.std(segment)
-        max_val = np.max(segment)
-        min_val = np.min(segment)
-        ptp_val = np.ptp(segment)
-
-        # Newer NumPy uses np.trapezoid instead of np.trapz
-        auc_val = np.trapezoid(segment, dx=1 / fs)
-        abs_auc_val = np.trapezoid(np.abs(segment), dx=1 / fs)
-
-        # Time of max/min relative to R peak, in ms
-        max_idx = np.argmax(segment)
-        min_idx = np.argmin(segment)
-
-        time_max_ms = start_ms + (max_idx / fs * 1000)
-        time_min_ms = start_ms + (min_idx / fs * 1000)
-
-        features += [
-            mean_val,
-            std_val,
-            max_val,
-            min_val,
-            ptp_val,
-            auc_val,
-            abs_auc_val,
-            time_max_ms,
-            time_min_ms,
-        ]
-
-    return features
-
 def extract_patient_features(lat, hf, dv, ecg, fs=500):
     # Extract features at patient level (one feature vector per patient).
     # beats segmented with r peaks, then features summarize all beats.
@@ -226,10 +135,9 @@ def extract_patient_features(lat, hf, dv, ecg, fs=500):
         return None  # too few beats, skip
     
     features = []
-
-    #features += hrv_features(r_peaks, fs)  #5
     
-    for axis_signal in [lat, hf, dv]:
+    #for axis_signal in [lat, hf, dv]:
+    for axis_signal in [lat]:
         beats = segment_beats(axis_signal, r_peaks, fs)
         if len(beats) < 3:
             return None
@@ -241,17 +149,8 @@ def extract_patient_features(lat, hf, dv, ecg, fs=500):
         beats_shape = (beats - np.mean(beats, axis=1, keepdims=True)) / (
             np.std(beats, axis=1, keepdims=True) + 1e-8
         )
-        #features += freq_features_beats(beats_shape, fs) #5
-        #features += waveform_variability(beats_shape) #2
-        #features += timing_features(beats_shape, fs) #2
-
-        avg_beat = np.mean(beats_shape, axis=0)
-
-        #features += window_morphology_features(
-        #    avg_beat,
-        #    fs=fs,
-        #    pre_ms=100
-        #)
+        features += freq_features_beats(beats_shape, fs) #5
+        features += timing_features(beats_shape, fs) #2
 
     return features
 
