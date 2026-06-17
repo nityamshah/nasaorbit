@@ -8,7 +8,8 @@ from sklearn.metrics import (accuracy_score, f1_score, roc_auc_score,
                              recall_score, classification_report, confusion_matrix,
                              average_precision_score)
 import numpy as np
-from setup import run_pipeline
+#from setupscgpeak import run_pipeline #for scg peak detection
+#from setup import run_pipeline #for ecg peak detection
 import pandas as pd
 
 X, y, groups, record_names = run_pipeline()
@@ -48,7 +49,8 @@ for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups)):
     model.fit(X_train, y_train)
 
     #preds = model.predict(X_test)
-    threshold = 0.4
+    #threshold = 0.4 #for ecg peak detection
+    threshold = 0.45 #for scg peak detection
     probs = model.predict_proba(X_test)[:, 1]
     preds = (probs >= threshold).astype(int)
 
