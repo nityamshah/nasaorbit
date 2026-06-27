@@ -7,13 +7,14 @@ from pathlib import Path
 from scipy.stats import entropy, skew, kurtosis
 from scipy.signal import butter, filtfilt, welch, find_peaks, hilbert
 
+# Parse record for the patient id
 def get_pid_from_record_name(record_name):
     match = re.match(r"TRM(\d+)-RHC\d+", record_name)
     if match is None:
         return None
     return int(match.group(1))
 
-
+# Find available records to use
 def find_available_records(processed_dir):
     processed_dir = Path(processed_dir)
 
@@ -27,15 +28,14 @@ def find_available_records(processed_dir):
         if not dat_path.exists():
             print(f"Skipping {record_base.name}: missing .dat")
             continue
-
         if not json_path.exists():
             print(f"Skipping {record_base.name}: missing .json")
             continue
-
         record_paths.append(record_base)
 
     return record_paths
 
+# Get CDecomp Label from json
 def get_label_from_json(json_path):
     with open(json_path, "r") as f:
         meta = json.load(f)
@@ -56,26 +56,21 @@ def bandpass_filter(x, low=1, high=40, fs=500, order=3):
     b, a = butter(order, [low/(fs/2), high/(fs/2)], btype='band')
     return filtfilt(b, a, x)
 
-def detect_r_peaks(ecg, fs=500):
-    # Simple R peak detector using thresholded peak finding
-    ecg_filt = bandpass_filter(ecg, low=5, high=40, fs=fs, order=3)
-    ecg_norm = ecg_filt / (np.std(ecg_filt) + 1e-8)
-    min_distance = int(0.4 * fs)  # minimum 400ms between beats (around 150 bpm max)
-    peaks, _ = find_peaks(ecg_norm, height=0.5, distance=min_distance)
-    return peaks
-
-def segment_beats(signal, r_peaks, fs=500, pre_ms=100, post_ms=400):
-    # Cut signal into individual beats around R peaks
+def segment_beats(signal, peaks, fs=500, pre_ms=100, post_ms=400):
+    # Cut signal into individual beats around peaks
     pre = int(pre_ms * fs / 1000)
     post = int(post_ms * fs / 1000)
     beats = []
-    for r in r_peaks:
+    for r in peaks:
         if r - pre >= 0 and r + post < len(signal):
             beats.append(signal[r - pre: r + post])
     return np.array(beats)  # shape is (n_beats, beat_len)
 
 def time_features_beats(beats):
-    rms = np.sqrt(np.mean(beats**2, axis=1))
+    # RMS feature commented out because performs better with just ptp, maintained in code for
+    # future reference
+
+    #rms = np.sqrt(np.mean(beats**2, axis=1))
     ptp = np.ptp(beats, axis=1)
     
     features = []
@@ -85,14 +80,17 @@ def time_features_beats(beats):
     return features  # 6 features per axis
 
 def freq_features_beats(beats, fs=500):
+    # Frequency features besides bp20_40 commented out because performs better without,
+    # maintained in code for future reference
+
     avg_beat = np.mean(beats, axis=0)
     f, pxx = welch(avg_beat, fs=fs, nperseg=min(256, len(avg_beat)))
     pxx_norm = pxx / (np.sum(pxx) + 1e-8)
     
-    dom_freq = f[np.argmax(pxx)]
-    spec_entropy = entropy(pxx_norm)
-    bp1_10  = np.sum(pxx[(f >= 1)  & (f < 10)])
-    bp10_20 = np.sum(pxx[(f >= 10) & (f < 20)])
+    #dom_freq = f[np.argmax(pxx)]
+    #spec_entropy = entropy(pxx_norm)
+    #bp1_10  = np.sum(pxx[(f >= 1)  & (f < 10)])
+    #bp10_20 = np.sum(pxx[(f >= 10) & (f < 20)])
     bp20_40 = np.sum(pxx[(f >= 20) & (f < 40)])
     
     #return [dom_freq, spec_entropy, bp1_10, bp10_20, bp20_40]  # 5 per axis
@@ -105,7 +103,7 @@ def timing_features(beats, fs=500, pre_ms=100):
 
     r0 = int(pre_ms * fs / 1000)
 
-    # Search only after R peak, e.g. 30–350 ms post-R
+    # Search only after peak, e.g. 30–350 ms post
     start = r0 + int(0.03 * fs)
     end   = r0 + int(0.35 * fs)
     segment = smoothed[start:end]
@@ -127,19 +125,9 @@ def timing_features(beats, fs=500, pre_ms=100):
     else:
         return [np.nan, np.nan]
     
-def detect_scg_peaks_from_lat(
-    lat,
-    fs=500,
-    low=5,
-    high=25,
-    max_hr=180,
-    smooth_ms=120,
-    prominence_factor=0.50
-):
-    """
-    Detect beat-like mechanical peaks using only lateral SCG.
-    These are SCG mechanical peaks, not ECG R peaks.
-    """
+def detect_scg_peaks_from_lat(lat, fs=500, low=5, high=25, max_hr=180, smooth_ms=120, prominence_factor=0.50):
+    #Detect beat-like mechanical peaks using only lateral SCG.
+    #These are SCG mechanical peaks, not ECG R peaks.
 
     lat = np.asarray(lat)
 
@@ -167,66 +155,41 @@ def detect_scg_peaks_from_lat(
     # Adaptive prominence threshold
     prominence = prominence_factor * np.std(envelope_smooth)
 
-    peaks, _ = find_peaks(
-        envelope_smooth,
-        distance=min_distance,
-        prominence=prominence
-    )
+    peaks, _ = find_peaks(envelope_smooth, distance=min_distance, prominence=prominence)
 
     return peaks
 
 def extract_patient_features(lat, hf, dv, ecg, fs=500):
     # Extract features at patient level (one feature vector per patient).
-    # beats segmented with r peaks, then features summarize all beats.
-    r_peaks = detect_r_peaks(ecg, fs)
     
-    if len(r_peaks) < 5:
-        return None  # too few beats, skip
-    
-    scg_peaks = detect_scg_peaks_from_lat(
-        lat,
-        fs=fs,
-        low=5,
-        high=25,
-        max_hr=180,
-        smooth_ms=120,
-        prominence_factor=0.50
-    )
+    scg_peaks = detect_scg_peaks_from_lat(lat, fs=fs, low=5, high=25, max_hr=180, smooth_ms=120, prominence_factor=0.50)
 
     if len(scg_peaks) < 5:
         return None
 
-    
     features = []
     
-    #for axis_signal in [lat, hf, dv]:
+    # Dv axis commented out because performs better without,
+    # maintained in code for future reference
+    # for axis_signal in [lat, hf, dv]:
     for axis_signal in [lat, hf]:
-        #beats = segment_beats(axis_signal, r_peaks, fs)
-        #if len(beats) < 3:
-        #    return None
 
-        beats = segment_beats(
-            lat,
-            scg_peaks,
-            fs=fs,
-            pre_ms=100,
-            post_ms=400
-        )
+        beats = segment_beats(lat, scg_peaks, fs=fs, pre_ms=100, post_ms=400)
 
         if len(beats) < 5:
             return None
-
-
         
         # Raw amplitude features
-        features += time_features_beats(beats) #6
+        features += time_features_beats(beats) 
 
         # Shape-normalized features
         beats_shape = (beats - np.mean(beats, axis=1, keepdims=True)) / (
             np.std(beats, axis=1, keepdims=True) + 1e-8
         )
-        features += freq_features_beats(beats_shape, fs) #5
-        #features += timing_features(beats_shape, fs) #2
+        features += freq_features_beats(beats_shape, fs)
+        # Timing features commented out because performs better without,
+        # maintained in code for future reference
+        #features += timing_features(beats_shape, fs)
 
     return features
 
@@ -239,7 +202,7 @@ def run_pipeline():
     print(f"Found {len(record_paths)} available RHC records")
 
     for record_base in record_paths:
-        record_name = record_base.name              # example: TRM127-RHC2
+        record_name = record_base.name         
         pid = get_pid_from_record_name(record_name)
 
         if pid is None:
@@ -291,8 +254,8 @@ def run_pipeline():
             X.append(features)
             y.append(label)
 
-            # Important: group by patient ID, NOT by RHC visit.
-            # This prevents RHC1 from a patient being in train while RHC2 is in test.
+            # group by patient ID, NOT by RHC visit
+            # This prevents RHC1 from a patient being in train while RHC2 is in test
             groups.append(pid)
 
             record_names.append(record_name)

@@ -6,13 +6,14 @@ from pathlib import Path
 from scipy.signal import butter, filtfilt, welch, find_peaks
 from scipy.stats import entropy, skew, kurtosis
 
+# Parse record for the patient id
 def get_pid_from_record_name(record_name):
     match = re.match(r"TRM(\d+)-RHC\d+", record_name)
     if match is None:
         return None
     return int(match.group(1))
 
-
+# Find available records to use
 def find_available_records(processed_dir):
     processed_dir = Path(processed_dir)
 
@@ -35,6 +36,7 @@ def find_available_records(processed_dir):
 
     return record_paths
 
+# Get CDecomp Label from json
 def get_label_from_json(json_path):
     with open(json_path, "r") as f:
         meta = json.load(f)
@@ -74,6 +76,8 @@ def segment_beats(signal, r_peaks, fs=500, pre_ms=100, post_ms=400):
     return np.array(beats)  # shape is (n_beats, beat_len)
 
 def time_features_beats(beats):
+    # RMS feature commented out because performs better with just ptp, maintained in code for
+    # future reference
     rms = np.sqrt(np.mean(beats**2, axis=1))
     ptp = np.ptp(beats, axis=1)
     
@@ -84,6 +88,8 @@ def time_features_beats(beats):
     return features  # 6 features per axis
 
 def freq_features_beats(beats, fs=500):
+    # Some frequency features not used because performs better without,
+    # maintained in code for future reference
     avg_beat = np.mean(beats, axis=0)
     f, pxx = welch(avg_beat, fs=fs, nperseg=min(256, len(avg_beat)))
     pxx_norm = pxx / (np.sum(pxx) + 1e-8)
@@ -127,8 +133,7 @@ def timing_features(beats, fs=500, pre_ms=100):
         return [np.nan, np.nan]
 
 def extract_patient_features(lat, hf, dv, ecg, fs=500):
-    # Extract features at patient level (one feature vector per patient).
-    # beats segmented with r peaks, then features summarize all beats.
+    # Extract features at patient level (one feature vector per patient)
     r_peaks = detect_r_peaks(ecg, fs)
     
     if len(r_peaks) < 5:
@@ -136,6 +141,8 @@ def extract_patient_features(lat, hf, dv, ecg, fs=500):
     
     features = []
     
+    # Hf, dv axis commented out because performs better without,
+    # maintained in code for future reference
     #for axis_signal in [lat, hf, dv]:
     for axis_signal in [lat]:
         beats = segment_beats(axis_signal, r_peaks, fs)
@@ -143,14 +150,14 @@ def extract_patient_features(lat, hf, dv, ecg, fs=500):
             return None
         
         # Raw amplitude features
-        features += time_features_beats(beats) #6
+        features += time_features_beats(beats)
 
         # Shape-normalized features
         beats_shape = (beats - np.mean(beats, axis=1, keepdims=True)) / (
             np.std(beats, axis=1, keepdims=True) + 1e-8
         )
-        features += freq_features_beats(beats_shape, fs) #5
-        features += timing_features(beats_shape, fs) #2
+        features += freq_features_beats(beats_shape, fs)
+        features += timing_features(beats_shape, fs)
 
     return features
 
@@ -163,7 +170,7 @@ def run_pipeline():
     print(f"Found {len(record_paths)} available RHC records")
 
     for record_base in record_paths:
-        record_name = record_base.name              # example: TRM127-RHC2
+        record_name = record_base.name           
         pid = get_pid_from_record_name(record_name)
 
         if pid is None:
@@ -215,8 +222,8 @@ def run_pipeline():
             X.append(features)
             y.append(label)
 
-            # Important: group by patient ID, NOT by RHC visit.
-            # This prevents RHC1 from a patient being in train while RHC2 is in test.
+            # group by patient ID, NOT by RHC visit
+            # This prevents RHC1 from a patient being in train while RHC2 is in test
             groups.append(pid)
 
             record_names.append(record_name)
